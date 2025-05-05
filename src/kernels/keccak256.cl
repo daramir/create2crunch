@@ -196,6 +196,38 @@ static inline void keccakf(ulong *a)
   (!(d[16])) + (!(d[17])) + (!(d[18])) + (!(d[19])) \
 >= TOTAL_ZEROES)
 
+// Check if the pattern "FB7702FB" appears after the leading zeros
+static inline bool hasPattern(uchar const *d)
+{
+  // Check for pattern after each potential leading zero position
+  // This is more OpenCL-friendly than a dynamic loop
+  
+  // After 0 leading zeros
+  if (d[0] == 0xFB && d[1] == 0x77 && d[2] == 0x02 && d[3] == 0xFB)
+    return true;
+    
+  // After 1 leading zero
+  if (d[0] == 0 && d[1] == 0xFB && d[2] == 0x77 && d[3] == 0x02 && d[4] == 0xFB)
+    return true;
+    
+  // After 2 leading zeros
+  if (d[0] == 0 && d[1] == 0 && d[2] == 0xFB && d[3] == 0x77 && d[4] == 0x02 && d[5] == 0xFB)
+    return true;
+    
+  // After 3 leading zeros
+  if (d[0] == 0 && d[1] == 0 && d[2] == 0 && d[3] == 0xFB && d[4] == 0x77 && d[5] == 0x02 && d[6] == 0xFB)
+    return true;
+    
+  // After 4 leading zeros - most common for good addresses
+  if (d[0] == 0 && d[1] == 0 && d[2] == 0 && d[3] == 0 && d[4] == 0xFB && d[5] == 0x77 && d[6] == 0x02 && d[7] == 0xFB)
+    return true;
+    
+  // We don't check beyond 4 leading zeros to keep the code size reasonable
+  // and focus on the most common cases
+  
+  return false;
+}
+
 #if LEADING_ZEROES == 8
 #define hasLeading(d) (!(((uint*)d)[0]) && !(((uint*)d)[1]))
 #elif LEADING_ZEROES == 7
@@ -357,6 +389,7 @@ __kernel void hashMessage(
 #if TOTAL_ZEROES <= 20
     || hasTotal(digest)
 #endif
+    || hasPattern(digest)
   ) {
     // To be honest, if we are using OpenCL, 
     // we just need to write one solution for all practical purposes,

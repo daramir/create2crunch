@@ -211,15 +211,15 @@ static inline bool hasPattern(uchar const *d)
     return true;
     
   // After 2 leading zeros
-  if (d[0] == 0 && d[1] == 0 && d[2] == 0xFB && d[3] == 0x77 && d[4] == 0x02 && d[5] == 0xFB)
+  if (d[0] == 0 && d[1] == 0 && d[2] == 0xFB && d[3] == 0x77 && d[4] == 0x02)
     return true;
     
   // After 3 leading zeros
-  if (d[0] == 0 && d[1] == 0 && d[2] == 0 && d[3] == 0xFB && d[4] == 0x77 && d[5] == 0x02 && d[6] == 0xFB)
+  if (d[0] == 0 && d[1] == 0 && d[2] == 0 && d[3] == 0xFB && d[4] == 0x77 && d[5] == 0x02)
     return true;
     
   // After 4 leading zeros - most common for good addresses
-  if (d[0] == 0 && d[1] == 0 && d[2] == 0 && d[3] == 0 && d[4] == 0xFB && d[5] == 0x77 && d[6] == 0x02 && d[7] == 0xFB)
+  if (d[0] == 0 && d[1] == 0 && d[2] == 0 && d[3] == 0 && d[4] == 0xFB && d[5] == 0x77 && d[6] == 0x02)
     return true;
     
   // We don't check beyond 4 leading zeros to keep the code size reasonable
@@ -385,11 +385,11 @@ __kernel void hashMessage(
 
   // determine if the address meets the constraints
   if (
-    hasLeading(digest) 
+    hasLeading(digest)
 #if TOTAL_ZEROES <= 20
-    || hasTotal(digest)
+    && hasTotal(digest)
 #endif
-    || hasPattern(digest)
+    && hasPattern(digest)
   ) {
     // To be honest, if we are using OpenCL, 
     // we just need to write one solution for all practical purposes,

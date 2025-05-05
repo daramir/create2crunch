@@ -201,9 +201,29 @@ pub fn cpu(config: Config) -> Result<(), Box<dyn Error>> {
                     return;
                 }
 
-                // look up the reward amount
+                // Check if the pattern "FB7702FB" appears after the leading zeros
+                let has_pattern = if leading < address.len() - 4 {
+                    let pattern = [0xFB, 0x77, 0x02, 0xFB];
+                    address[leading..leading + 4] == pattern
+                } else {
+                    false
+                };
+
+                // Look up the reward amount
                 let key = leading * 20 + total;
                 let reward_amount = rewards.get(&key);
+
+                // Boost reward for addresses with the pattern
+                let reward_amount = if has_pattern {
+                    // Use existing reward or a high default if not in the map
+                    Some(
+                        rewards
+                            .get(&(key + 1000))
+                            .unwrap_or(&"100000000000000000000000000000"),
+                    )
+                } else {
+                    reward_amount
+                };
 
                 // only proceed if an efficient address has been found
                 if reward_amount.is_none() {
@@ -217,7 +237,12 @@ pub fn cpu(config: Config) -> Result<(), Box<dyn Error>> {
 
                 // display the salt and the address.
                 let output = format!(
-                    "{full_salt} => {address} => {}",
+                    "{full_salt} => {address} => {} {}",
+                    if has_pattern {
+                        "♦️FB7702FB♦️"
+                    } else {
+                        ""
+                    },
                     reward_amount.unwrap_or("0")
                 );
                 println!("{output}");
@@ -287,11 +312,24 @@ pub fn gpu(config: Config) -> ocl::Result<()> {
         .devices(device)
         .build()?;
 
-    // set up the program to use
-    let program = Program::builder()
+    // set up the program to use - directly build it as before
+    // Build with detailed error handling
+    let program = match Program::builder()
         .devices(device)
         .src(mk_kernel_src(&config))
-        .build(&context)?;
+        .build(&context)
+    {
+        Ok(prog) => prog,
+        Err(e) => {
+            // Print more detailed error information
+            eprintln!("OpenCL kernel compilation failed!");
+            eprintln!("Error: {}", e);
+            eprintln!("This may be due to syntax errors in the kernel code.");
+            eprintln!("Details: {:?}", e);
+
+            return Err(e);
+        }
+    };
 
     // set up the queue to use
     let queue = Queue::new(&context, device, None)?;
@@ -509,36 +547,80 @@ pub fn gpu(config: Config) -> ocl::Result<()> {
 
             // count total and leading zero bytes
             let mut total = 0;
-            let mut leading = 0;
+            let mut leading = 21; // Initialize to max value as in CPU implementation
             for (i, &b) in address.iter().enumerate() {
                 if b == 0 {
                     total += 1;
-                } else if leading == 0 {
+                } else if leading == 21 {
                     // set leading on finding non-zero byte
                     leading = i;
                 }
             }
 
+            // If we never found a non-zero byte, set leading to address length
+            if leading == 21 {
+                leading = address.len();
+            }
+
+            // Check if the pattern "FB7702FB" appears after the leading zeros
+            let pattern = [0xFB, 0x77, 0x02];
+            let has_pattern = if leading < address.len() - 4 {
+                address[leading..leading + 3] == pattern
+            } else {
+                false
+            };
+
             let key = leading * 20 + total;
-            let reward = rewards.get(&key).unwrap_or("0");
-            let output = format!(
-                "0x{}{}{} => {} => {}",
-                hex::encode(config.calling_address),
-                hex::encode(salt),
-                hex::encode(solution),
-                address,
-                reward,
-            );
+            let reward = if has_pattern {
+                // Use existing reward or a high default if not in the map
+                rewards
+                    .get(&(key + (50 * pattern.len())))
+                    .unwrap_or(format!(
+                        "{}{}", // Placeholders for the 2 parts
+                        &"10000000000000000000000000", key
+                    ))
+            } else {
+                rewards.get(&key).unwrap_or("0")
+            };
 
-            let show = format!("{output} ({leading} / {total})");
-            found_list.push(show.to_string());
+            // Parse the reward string into a numerical value.
+            // Assuming reward is a large integer, use u128. Handle potential parse errors.
+            let reward_value = match reward.parse::<u128>() {
+                Ok(val) => val,
+                Err(_) => {
+                    // Handle error: maybe log it or default to 0
+                    eprintln!("Warning: Could not parse reward '{}' as u128.", reward);
+                    0
+                }
+            };
 
-            file.lock_exclusive().expect("Couldn't lock file.");
+            // Only proceed if the reward value is over X
+            if reward_value > 1000 {
+                let output = format!(
+                    "0x{}{}{} => {} => {} {}",
+                    hex::encode(config.calling_address),
+                    hex::encode(salt),
+                    hex::encode(solution),
+                    address,
+                    if has_pattern {
+                        "♦️FB7702FB♦️"
+                    } else {
+                        ""
+                    },
+                    reward, // Use the original reward string for output
+                );
 
-            writeln!(&file, "{output}").expect("Couldn't write to `efficient_addresses.txt` file.");
+                let show = format!("{output} ({leading} / {total})");
+                found_list.push(show.to_string());
 
-            file.unlock().expect("Couldn't unlock file.");
-            found += 1;
+                file.lock_exclusive().expect("Couldn't lock file.");
+
+                writeln!(&file, "{output}")
+                    .expect("Couldn't write to `efficient_addresses.txt` file.");
+
+                file.unlock().expect("Couldn't unlock file.");
+                found += 1;
+            }
         }
     }
 }

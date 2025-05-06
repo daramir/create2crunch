@@ -21,7 +21,7 @@ mod reward;
 pub use reward::Reward;
 
 // workset size (tweak this!)
-const WORK_SIZE: u32 = 0x4000000; // max. 0x15400000 to abs. max 0xffffffff
+const WORK_SIZE: u32 = 0xC000000; // max. 0x15400000 to abs. max 0xffffffff
 
 const WORK_FACTOR: u128 = (WORK_SIZE as u128) / 1_000_000;
 const CONTROL_CHARACTER: u8 = 0xff;
@@ -564,36 +564,45 @@ pub fn gpu(config: Config) -> ocl::Result<()> {
 
             // Check if the pattern "FB7702FB" appears after the leading zeros
             let pattern = [0xFB, 0x77, 0x02];
-            let has_pattern = if leading < address.len() - 4 {
+            let has_pattern = if leading < address.len() - 3 {
                 address[leading..leading + 3] == pattern
             } else {
                 false
             };
 
             let key = leading * 20 + total;
-            let reward = if has_pattern {
-                // Use existing reward or a high default if not in the map
-                rewards
-                    .get(&(key + (50 * pattern.len())))
-                    .unwrap_or(format!(
-                        "{}{}", // Placeholders for the 2 parts
-                        &"10000000000000000000000000", key
-                    ))
+            // Change reward to hold an owned String to avoid lifetime issues
+            let reward_str: String = if has_pattern {
+                let pattern_key = key + (50 * pattern.len());
+                match rewards.get(&pattern_key) {
+                    Some(s) => (*s).to_string(), // Clone the string slice from Reward
+                    None => format!(
+                        "10000000000000000000000000{}", // Append key to the large number string
+                        key
+                    ), // This creates an owned String
+                }
             } else {
-                rewards.get(&key).unwrap_or("0")
+                match rewards.get(&key) {
+                    Some(s) => (*s).to_string(), // Clone the string slice from Reward
+                    None => "0".to_string(),    // Create an owned String
+                }
             };
 
             // Parse the reward string into a numerical value.
             // Assuming reward is a large integer, use u128. Handle potential parse errors.
-            let reward_value = match reward.parse::<u128>() {
+            // Parse the owned String by reference
+            let reward_value = match reward_str.parse::<u128>() {
                 Ok(val) => val,
                 Err(_) => {
                     // Handle error: maybe log it or default to 0
-                    eprintln!("Warning: Could not parse reward '{}' as u128.", reward);
+                    // Use reward_str here as reward is no longer in scope or has the wrong type
+                    eprintln!("Warning: Could not parse reward '{}' as u128.", reward_str);
                     0
                 }
             };
 
+            // Log the reward value for debugging
+            // println!("Reward value: {}", reward_value);
             // Only proceed if the reward value is over X
             if reward_value > 1000 {
                 let output = format!(
@@ -607,7 +616,7 @@ pub fn gpu(config: Config) -> ocl::Result<()> {
                     } else {
                         ""
                     },
-                    reward, // Use the original reward string for output
+                    reward_str, // Use the owned reward string for output
                 );
 
                 let show = format!("{output} ({leading} / {total})");
